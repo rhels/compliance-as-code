@@ -28,6 +28,7 @@ registry.redhat.io/*: vendor-trusted | Konda | 2026-02-18
 quay.io/rhdh-community/*: community | ShieldBot | 2026-02-18
 quay.io/fedora/*: community | ShieldBot | 2026-02-18
 quay.io/openshift/*: vendor-trusted | Konda | 2026-02-17
+quay.io/brancz/*: vendor-scoped | KubeClaw | 2026-02-18  # kube-rbac-proxy sidecar used by VSO and other operators
 
 # Docker Hub — vendor-scoped (NOT docker.io/*)
 docker.io/bitnami/*: vendor-scoped | Konda | 2026-02-17
