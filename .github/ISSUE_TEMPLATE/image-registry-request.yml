@@ -1,0 +1,99 @@
+name: Image Registry Request
+description: Request a new container image registry or vendor path for the Kyverno allowlist
+title: "[REGISTRY] Add <vendor>/<image>"
+labels:
+  - registry-request
+  - needs-evaluation
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Image Registry Allowlist Request
+
+        Use this form to request adding a new container image vendor or path to the
+        platform's approved registry policy. Requests are automatically evaluated for
+        trust signals (CVEs, recency, vendor reputation) and may be auto-approved if
+        all criteria pass.
+
+        **Before submitting:** Check the [current allowlist](../blob/main/policies/image-registry/allowlist.yaml)
+        to verify the image is not already covered.
+
+  - type: input
+    id: image_reference
+    attributes:
+      label: Full image reference
+      description: "The complete image reference including registry, namespace, repository, and tag"
+      placeholder: "quay.io/vendor-name/image-name:tag"
+    validations:
+      required: true
+
+  - type: input
+    id: registry_pattern
+    attributes:
+      label: Requested Kyverno pattern
+      description: "The wildcard pattern to add to the policy (use * for wildcards). Prefer vendor-scoped patterns over broad registry patterns."
+      placeholder: "quay.io/vendor-name/*"
+    validations:
+      required: true
+
+  - type: input
+    id: vendor_name
+    attributes:
+      label: Vendor / Organization
+      description: "Who publishes this image?"
+      placeholder: "e.g., Red Hat, Fedora Project, HashiCorp, Bitnami, Grafana Labs"
+    validations:
+      required: true
+
+  - type: textarea
+    id: justification
+    attributes:
+      label: Justification
+      description: "Why does the platform need this image? Which component uses it?"
+      placeholder: |
+        This image is needed for:
+        - Component: <name>
+        - Use case: <description>
+        - No suitable alternative in already-approved registries because: <reason>
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope of access
+      description: "How broad should the allowlist pattern be?"
+      options:
+        - "Single image (e.g., quay.io/vendor/specific-image:*)"
+        - "Vendor namespace (e.g., quay.io/vendor/*)"
+        - "Entire registry (REQUIRES Konda approval)"
+    validations:
+      required: true
+
+  - type: input
+    id: platform_component
+    attributes:
+      label: Platform component
+      description: "Which platform-gitops directory or application will use this image?"
+      placeholder: "platform/<component-name>"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives_considered
+    attributes:
+      label: Alternatives considered
+      description: "What alternatives from already-approved registries were considered?"
+      placeholder: "e.g., Tried registry.access.redhat.com equivalent but it lacks X feature"
+
+  - type: checkboxes
+    id: acknowledgments
+    attributes:
+      label: Acknowledgments
+      options:
+        - label: "I have verified this image is not available from an already-approved registry"
+          required: true
+        - label: "I understand this request will be automatically scanned for CVEs"
+          required: true
+        - label: "I accept that broad patterns (entire registries) require Konda approval"
+          required: true

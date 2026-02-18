@@ -1,0 +1,175 @@
+name: Evaluate Registry Request
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  evaluate:
+    name: Evaluate Image Trust
+    if: contains(github.event.issue.labels.*.name, 'registry-request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Parse issue form fields
+        id: parse
+        uses: stefanbuck/github-issue-parser@v3
+        with:
+          template-path: .github/ISSUE_TEMPLATE/image-registry-request.yml
+
+      - name: Install evaluation tools
+        run: |
+          # Install skopeo
+          sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
+
+          # Install trivy
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+          # Install cosign
+          curl -fsSL https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64 -o /usr/local/bin/cosign
+          chmod +x /usr/local/bin/cosign
+
+      - name: Run evaluation
+        id: eval
+        env:
+          IMAGE_REF: ${{ steps.parse.outputs.issueparser_image_reference }}
+        run: |
+          chmod +x scripts/evaluate-registry-request.sh
+
+          # Run evaluation — capture output and exit code separately
+          set +e
+          RESULT=$(./scripts/evaluate-registry-request.sh "$IMAGE_REF" --json 2>/dev/null)
+          EXIT_CODE=$?
+          set -e
+
+          if [[ $EXIT_CODE -eq 3 ]] || [[ -z "$RESULT" ]]; then
+            echo "Evaluation failed with exit code $EXIT_CODE"
+            echo "decision=error" >> "$GITHUB_OUTPUT"
+            echo "score=0" >> "$GITHUB_OUTPUT"
+            echo "result={}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          SCORE=$(echo "$RESULT" | jq -r '.total_score')
+          DECISION=$(echo "$RESULT" | jq -r '.decision')
+
+          # Write multiline JSON to file for later steps
+          echo "$RESULT" > /tmp/eval-result.json
+
+          echo "score=$SCORE" >> "$GITHUB_OUTPUT"
+          echo "decision=$DECISION" >> "$GITHUB_OUTPUT"
+
+      - name: Post evaluation report as comment
+        if: steps.eval.outputs.decision != 'error'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const result = JSON.parse(fs.readFileSync('/tmp/eval-result.json', 'utf8'));
+            const scores = result.scores;
+
+            const decisionEmoji = {
+              'auto-approve': ':white_check_mark:',
+              'needs-human-review': ':warning:',
+              'auto-reject': ':x:'
+            };
+
+            let body = `## :shield: ShieldBot Evaluation Report\n\n`;
+            body += `**Image:** \`${result.image}\`\n`;
+            body += `**Score:** **${result.total_score}** / ${result.max_score}\n`;
+            body += `**Decision:** ${decisionEmoji[result.decision] || ':question:'} ${result.decision}\n\n`;
+            body += `| Criterion | Score | Detail |\n`;
+            body += `|-----------|------:|--------|\n`;
+            for (const [key, val] of Object.entries(scores)) {
+              const name = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              body += `| ${name} | ${val.points}/${val.max} | ${val.detail} |\n`;
+            }
+            body += `\n### Trivy CVE Summary\n`;
+            body += `| Critical | High | Medium | Low |\n`;
+            body += `|----------|------|--------|-----|\n`;
+            body += `| ${result.trivy_summary.critical} | ${result.trivy_summary.high} | `;
+            body += `${result.trivy_summary.medium} | ${result.trivy_summary.low} |\n\n`;
+
+            if (result.decision === 'auto-approve') {
+              body += `> :rocket: This request has been **auto-approved**. A PR will be generated.\n`;
+            } else if (result.decision === 'needs-human-review') {
+              body += `> :eyes: This request requires **human review**. An authorized reviewer can approve by commenting \`/approve-registry\`.\n`;
+            } else {
+              body += `> :no_entry: This request was **auto-rejected**. The image did not meet minimum trust criteria.\n`;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      - name: Post error comment
+        if: steps.eval.outputs.decision == 'error'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## :x: Evaluation Error\n\nThe automated evaluation failed for this image. This may be due to:\n- Image not publicly accessible\n- Registry API unavailable\n- Invalid image reference\n\nPlease verify the image reference and resubmit, or request manual review.`
+            });
+
+      - name: Update labels based on decision
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const decision = '${{ steps.eval.outputs.decision }}';
+            const issue = context.issue.number;
+            const { owner, repo } = context.repo;
+
+            // Remove needs-evaluation label
+            try {
+              await github.rest.issues.removeLabel({ owner, repo, issue_number: issue, name: 'needs-evaluation' });
+            } catch(e) { /* label may not exist */ }
+
+            const labelMap = {
+              'auto-approve': ['evaluation-passed', 'auto-approved'],
+              'needs-human-review': ['needs-human-review'],
+              'auto-reject': ['evaluation-failed'],
+              'error': ['needs-human-review']
+            };
+
+            const labels = labelMap[decision] || ['needs-human-review'];
+            await github.rest.issues.addLabels({ owner, repo, issue_number: issue, labels });
+
+      - name: Generate PR (auto-approved only)
+        if: steps.eval.outputs.decision == 'auto-approve'
+        env:
+          REGISTRY_PATTERN: ${{ steps.parse.outputs.issueparser_registry_pattern }}
+          VENDOR_NAME: ${{ steps.parse.outputs.issueparser_vendor_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "ShieldBot"
+          git config user.email "shieldbot@rhels.com"
+          chmod +x scripts/generate-registry-pr.sh
+          ./scripts/generate-registry-pr.sh "$REGISTRY_PATTERN" "$ISSUE_NUMBER" "$VENDOR_NAME"
+
+      - name: Label PR generated
+        if: steps.eval.outputs.decision == 'auto-approve'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['pr-generated']
+            });

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Current Allowlist
+    url: https://github.com/rhels/compliance-as-code/blob/main/policies/image-registry/allowlist.yaml
+    about: View the current list of approved registries before submitting a request
+  - name: Image Registry Governance Runbook
+    url: https://github.com/rhels/compliance-as-code/blob/main/docs/image-registry-governance.md
+    about: Understand the evaluation process and scoring model
+  - name: Platform Engineering Handbook
+    url: https://github.com/rhels/platform-engineering-handbook
+    about: Reference documentation for the platform

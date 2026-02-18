@@ -1,0 +1,36 @@
+# Image Registry Allowlist
+# =========================
+# Source of truth for approved container image registries.
+# Changes here trigger a sync workflow that updates the Kyverno ClusterPolicy
+# in rhels/platform-gitops.
+#
+# To add a new entry: open an Image Registry Request issue, or submit a PR
+# with justification.
+#
+# Format: "pattern: category | approved-by | date"
+#
+# Categories:
+#   org-controlled  — Images published by the RHELS organization
+#   vendor-trusted  — Images from established, trusted software vendors
+#   community       — Images from recognized open-source communities
+#   vendor-scoped   — Specific vendor namespaces on public registries
+
+---
+# Organization registries (full control)
+ghcr.io/rhels/*: org-controlled | Konda | 2026-02-17
+ghcr.io/openclaw/*: org-controlled | Konda | 2026-02-17
+
+# Red Hat ecosystem (vendor-trusted)
+registry.access.redhat.com/*: vendor-trusted | Konda | 2026-02-17
+registry.redhat.io/*: vendor-trusted | Konda | 2026-02-18
+
+# quay.io — vendor-scoped (NOT quay.io/*)
+quay.io/rhdh-community/*: community | ShieldBot | 2026-02-18
+quay.io/fedora/*: community | ShieldBot | 2026-02-18
+quay.io/openshift/*: vendor-trusted | Konda | 2026-02-17
+
+# Docker Hub — vendor-scoped (NOT docker.io/*)
+docker.io/bitnami/*: vendor-scoped | Konda | 2026-02-17
+docker.io/bitnamilegacy/*: vendor-scoped | Konda | 2026-02-17
+docker.io/hashicorp/*: vendor-scoped | Konda | 2026-02-17
+hashicorp/*: vendor-scoped | Konda | 2026-02-17
