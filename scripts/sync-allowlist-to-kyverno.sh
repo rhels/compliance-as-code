@@ -69,6 +69,10 @@ generate_value_list() {
 VALUE_LIST=$(generate_value_list)
 
 # --- Generate the ClusterPolicy ---
+# Uses a single foreach with JMESPath flattening to cover all container types
+# in one pass — avoids duplicating the allowlist 3x and is cleaner YAML.
+# Note: validate.message cannot use {{ element.* }} (element is only in scope
+# inside foreach). The deny block also does not support .message in Kyverno v1.
 POLICY_YAML=$(cat <<POLICYEOF
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -107,27 +111,17 @@ spec:
                 - argocd
                 - openshift-gitops
       validate:
+        # NOTE: validate.message cannot use {{ element.* }} — element is only in scope
+        # inside foreach. Use a static message here.
         message: >-
-          Image "{{ element.image }}" is not from an approved registry.
+          One or more container images are not from an approved registry.
+          Approved registries are vendor-scoped (not entire registries).
           To request a new registry: https://github.com/rhels/compliance-as-code/issues/new?template=image-registry-request.yml
+        # Single foreach with JMESPath flattening covers containers, initContainers,
+        # and ephemeralContainers in one pass — no allowlist duplication.
+        # Allowlist source of truth: rhels/compliance-as-code/policies/image-registry/allowlist.yaml
         foreach:
-          - list: "request.object.spec.containers || []"
-            deny:
-              conditions:
-                all:
-                  - key: "{{ element.image }}"
-                    operator: AnyNotIn
-                    value:
-$VALUE_LIST
-          - list: "request.object.spec.initContainers || []"
-            deny:
-              conditions:
-                all:
-                  - key: "{{ element.image }}"
-                    operator: AnyNotIn
-                    value:
-$VALUE_LIST
-          - list: "request.object.spec.ephemeralContainers || []"
+          - list: "request.object.spec.[containers, initContainers, ephemeralContainers][] | []"
             deny:
               conditions:
                 all:
